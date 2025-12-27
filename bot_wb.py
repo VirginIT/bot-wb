@@ -1,11 +1,12 @@
 import pandas as pd
-from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
+from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InputFile
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext
 from telegram.error import Conflict
 import os
 import datetime
 import logging
 from dotenv import load_dotenv
+from io import BytesIO
 
 # Загружаем переменные окружения
 load_dotenv()
@@ -66,7 +67,7 @@ def handle_excel(file_path):
         output = "\n".join([f"{row['Артикул']} {row['Количество']}шт" for _, row in grouped_df.iterrows()])
 
         logger.info("Файл успешно обработан")
-        return output
+        return output, grouped_df  # Возвращаем и текст, и DataFrame
     except Exception as e:
         logger.error(f"Ошибка при обработке Excel файла: {e}")
         raise
@@ -112,13 +113,29 @@ async def handle_document(update: Update, context: CallbackContext):
             logger.info(f"Файл {file_name} загружен")
 
             # Обрабатываем Excel файл
-            report = handle_excel('temp_report.xlsx')
+            report, grouped_df = handle_excel('temp_report.xlsx')
 
             # Сохраняем результат в историю
             save_history(report)
 
-            # Отправляем результат пользователю
+            # Отправляем текстовый результат пользователю
             await update.message.reply_text(f"Результат:\n{report}")
+            
+            # Создаем Excel файл в памяти без заголовков
+            output_excel = BytesIO()
+            # Сохраняем DataFrame без заголовков (первая колонка - Артикул, вторая - Количество)
+            grouped_df[['Артикул', 'Количество']].to_excel(
+                output_excel,
+                index=False,
+                header=False,
+                engine='openpyxl'
+            )
+            output_excel.seek(0)  # Возвращаемся в начало файла
+            
+            # Отправляем Excel файл
+            excel_file = InputFile(output_excel.getvalue(), filename='result.xlsx')
+            await update.message.reply_document(document=excel_file)
+            
             logger.info(f"Результат отправлен пользователю {user_id}")
             
             # Удаляем временный файл
